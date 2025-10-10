@@ -12,6 +12,8 @@ from exo.topology.device_capabilities import device_capabilities, UNKNOWN_DEVICE
 from exo.topology.partitioning_strategy import Partition, PartitioningStrategy, map_partitions_to_shards
 from exo import DEBUG
 from exo.helpers import AsyncCallbackSystem
+from exo.simulation.config import get_simulation_config
+from exo.simulation.fault_injector import flip_bits_numpy, inject_token_error
 from exo.viz.topology_viz import TopologyViz
 from exo.download.download_progress import RepoProgressEvent
 from exo.inference.inference_engine import get_inference_engine, InferenceEngine
@@ -126,6 +128,13 @@ class Node:
       is_finished = len(self.buffered_token_output[request_id][0]) >= self.max_generate_tokens
       if shard.is_last_layer() and not is_finished:
         token = await self.inference_engine.sample(result, temp=self.default_sample_temperature)
+        # BER injection at token sampling stage
+        sim = get_simulation_config()
+        if sim and sim.enable and sim.ber and (sim.ber_scope == 'token_sampling'):
+          try:
+            token = inject_token_error(token, sim.ber, seed=sim.seed)
+          except Exception:
+            pass
         await self.inference_engine.ensure_shard(shard)
         self.buffered_token_output[request_id][0].append(token.item())
         is_finished = token.item() == self.inference_engine.tokenizer.eos_token_id or is_finished or len(self.buffered_token_output[request_id][0]) >= self.max_generate_tokens
@@ -379,7 +388,38 @@ class Node:
 
     try:
       self.outstanding_requests[request_id] = "processing"
+      # BER injection on forward tensor
+      sim = get_simulation_config()
+      if sim and sim.enable and sim.ber and (sim.ber_scope == 'forward_tensor'):
+        try:
+          tensor = flip_bits_numpy(tensor, sim.ber, seed=sim.seed)
+        except Exception:
+          pass
+      # Measure inference duration for runtime compute throttling
+      t_infer_start = time.perf_counter()
       result, inference_state = await self.inference_engine.infer_tensor(request_id, shard, tensor, inference_state)
+      t_infer_end = time.perf_counter()
+      # Apply runtime throttling based on tops_scale to simulate reduced compute throughput
+      if sim and sim.enable:
+        try:
+          slow_factor = None
+          if sim.tops_scale is not None:
+            slow_factor = float(sim.tops_scale)
+          # Only enforce delay when slowing down (0 < scale < 1). We cannot speed up >1.
+          if slow_factor is not None and 0.0 < slow_factor < 1.0:
+            infer_duration = t_infer_end - t_infer_start
+            delay = infer_duration * (1.0 / slow_factor - 1.0)
+            if delay > 0:
+              await asyncio.sleep(delay)
+        except Exception:
+          # Fail-open on malformed config
+          pass
+      # BER injection on output tensor
+      if sim and sim.enable and sim.ber and (sim.ber_scope == 'output_tensor'):
+        try:
+          result = flip_bits_numpy(result, sim.ber, seed=sim.seed)
+        except Exception:
+          pass
       ret = await self.process_inference_result(shard, result, request_id, inference_state) 
       return ret
     except Exception as e:

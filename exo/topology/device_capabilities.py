@@ -5,6 +5,7 @@ import subprocess
 import psutil
 import asyncio
 from exo.helpers import get_mac_system_info, subprocess_pool
+from exo.simulation.config import get_simulation_config
 
 TFLOPS = 1.00
 
@@ -148,19 +149,34 @@ CHIP_FLOPS.update({f"{key} Laptop GPU": value for key, value in CHIP_FLOPS.items
 
 
 async def device_capabilities() -> DeviceCapabilities:
+  # Detect native capabilities
   if psutil.MACOS:
-    return await mac_device_capabilities()
+    caps = await mac_device_capabilities()
   elif psutil.LINUX:
-    return await linux_device_capabilities()
+    caps = await linux_device_capabilities()
   elif psutil.WINDOWS:
-    return await windows_device_capabilities()
+    caps = await windows_device_capabilities()
   else:
-    return DeviceCapabilities(
+    caps = DeviceCapabilities(
       model="Unknown Device",
       chip="Unknown Chip",
       memory=psutil.virtual_memory().total // 2**20,
       flops=DeviceFlops(fp32=0, fp16=0, int8=0),
     )
+
+  # Apply simulation overrides (TOPS as fp16 TFLOPS)
+  sim = get_simulation_config()
+  if sim and sim.enable:
+    try:
+      if sim.tops_override_fp16_tflops is not None:
+        caps.flops.fp16 = float(sim.tops_override_fp16_tflops)
+      if sim.tops_scale is not None:
+        caps.flops.fp16 = float(caps.flops.fp16) * float(sim.tops_scale)
+    except Exception as _:
+      # Fail-open: keep native capabilities if config malformed
+      pass
+
+  return caps
 
 
 async def mac_device_capabilities() -> DeviceCapabilities:

@@ -1,0 +1,23 @@
+{
+  "profiles": {
+    "a100_40g": {
+      "enable": true,
+      "seed": 42,
+      "tops_override_fp16_tflops": null,
+      "tops_scale": 0.5,
+      "ber": 1e-6,
+      "ber_scope": "output_tensor",
+      "weighting_alpha": 1.0
+    },
+    "a100_80g": {
+      "enable": true,
+      "seed": 42,
+      "tops_override_fp16_tflops": null,
+      "tops_scale": 0.5,
+      "ber": 1e-6,
+      "ber_scope": "output_tensor",
+      "weighting_alpha": 1.0
+    }
+  },
+  "default_profile": "a100_40g"
+}
