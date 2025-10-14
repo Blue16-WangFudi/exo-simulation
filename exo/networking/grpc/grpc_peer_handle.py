@@ -13,6 +13,7 @@ from exo.topology.device_capabilities import DeviceCapabilities, DeviceFlops
 from exo.helpers import DEBUG
 import json
 import platform
+from exo.simulation.network import active_config, maybe_throttle, apply_ber_to_bytes
 
 if platform.system().lower() == "darwin" and platform.machine().lower() == "arm64":
   import mlx.core as mx
@@ -99,6 +100,13 @@ class GRPCPeerHandle(PeerHandle):
 
   async def send_prompt(self, shard: Shard, prompt: str, inference_state: Optional[dict] = None, request_id: Optional[str] = None) -> Optional[np.array]:
     await self._ensure_connected()
+    # Throttle upload based on prompt size (bytes); avoid BER on text
+    cfg = active_config()
+    if cfg is not None and cfg.upload_gbps is not None and cfg.upload_gbps > 0:
+      try:
+        await maybe_throttle(len(prompt.encode('utf-8')), cfg.upload_gbps)
+      except Exception:
+        pass
     request = node_service_pb2.PromptRequest(
       prompt=prompt,
       shard=node_service_pb2.Shard(
@@ -114,6 +122,12 @@ class GRPCPeerHandle(PeerHandle):
 
   async def send_tensor(self, shard: Shard, tensor: np.ndarray, inference_state: Optional[dict] = None, request_id: Optional[str] = None) -> Optional[np.array]:
     await self._ensure_connected()
+    cfg = active_config()
+    tensor_bytes = tensor.tobytes()
+    if cfg is not None:
+      # Apply upload BER and throttle before sending
+      tensor_bytes = apply_ber_to_bytes(tensor_bytes, cfg.upload_ber, cfg.seed)
+      await maybe_throttle(len(tensor_bytes), cfg.upload_gbps)
     request = node_service_pb2.TensorRequest(
       shard=node_service_pb2.Shard(
         model_id=shard.model_id,
@@ -121,7 +135,7 @@ class GRPCPeerHandle(PeerHandle):
         end_layer=shard.end_layer,
         n_layers=shard.n_layers,
       ),
-      tensor=node_service_pb2.Tensor(tensor_data=tensor.tobytes(), shape=tensor.shape, dtype=str(tensor.dtype)),
+      tensor=node_service_pb2.Tensor(tensor_data=tensor_bytes, shape=tensor.shape, dtype=str(tensor.dtype)),
       request_id=request_id,
       inference_state=None if inference_state is None else self.serialize_inference_state(inference_state)
     )
@@ -129,11 +143,25 @@ class GRPCPeerHandle(PeerHandle):
 
     if not response.tensor_data or not response.shape or not response.dtype:
       return None
-
-    return np.frombuffer(response.tensor_data, dtype=np.dtype(response.dtype)).reshape(response.shape)
+    # Apply download BER and throttle on received bytes
+    resp_bytes = bytes(response.tensor_data)
+    if cfg is not None:
+      resp_bytes = apply_ber_to_bytes(resp_bytes, cfg.download_ber, cfg.seed)
+      await maybe_throttle(len(resp_bytes), cfg.download_gbps)
+    return np.frombuffer(resp_bytes, dtype=np.dtype(response.dtype)).reshape(response.shape)
 
   async def send_example(self, shard: Shard, example: np.ndarray, target: np.ndarray, length: np.ndarray, train: bool, request_id: Optional[str] = None) -> Optional[np.array]:
     await self._ensure_connected()
+    cfg = active_config()
+    # Prepare example/target/length bytes with upload BER and throttle
+    ex_bytes = example.tobytes()
+    tgt_bytes = target.tobytes()
+    len_bytes = length.tobytes()
+    if cfg is not None:
+      ex_bytes = apply_ber_to_bytes(ex_bytes, cfg.upload_ber, cfg.seed)
+      tgt_bytes = apply_ber_to_bytes(tgt_bytes, cfg.upload_ber, cfg.seed)
+      len_bytes = apply_ber_to_bytes(len_bytes, cfg.upload_ber, cfg.seed)
+      await maybe_throttle(len(ex_bytes) + len(tgt_bytes) + len(len_bytes), cfg.upload_gbps)
     request = node_service_pb2.ExampleRequest(
       shard=node_service_pb2.Shard(
         model_id=shard.model_id,
@@ -141,22 +169,32 @@ class GRPCPeerHandle(PeerHandle):
         end_layer=shard.end_layer,
         n_layers=shard.n_layers,
       ),
-      example=node_service_pb2.Tensor(tensor_data=example.tobytes(), shape=example.shape, dtype=str(example.dtype)),
-      target=node_service_pb2.Tensor(tensor_data=target.tobytes(), shape=target.shape, dtype=str(target.dtype)),
-      length=node_service_pb2.Tensor(tensor_data=length.tobytes(), shape=length.shape, dtype=str(length.dtype)),
+      example=node_service_pb2.Tensor(tensor_data=ex_bytes, shape=example.shape, dtype=str(example.dtype)),
+      target=node_service_pb2.Tensor(tensor_data=tgt_bytes, shape=target.shape, dtype=str(target.dtype)),
+      length=node_service_pb2.Tensor(tensor_data=len_bytes, shape=length.shape, dtype=str(length.dtype)),
       train=train,
       request_id=request_id,
     )
     response = await self.stub.SendExample(request)
     loss = response.loss
     if train and not shard.is_first_layer():
-      grads = np.frombuffer(response.grads.tensor_data, dtype=np.dtype(response.grads.dtype)).reshape(response.grads.shape)
+      # Apply download BER and throttle on gradient bytes
+      grad_bytes = bytes(response.grads.tensor_data)
+      if cfg is not None:
+        grad_bytes = apply_ber_to_bytes(grad_bytes, cfg.download_ber, cfg.seed)
+        await maybe_throttle(len(grad_bytes), cfg.download_gbps)
+      grads = np.frombuffer(grad_bytes, dtype=np.dtype(response.grads.dtype)).reshape(response.grads.shape)
       return loss, grads
     else:
       return loss
 
   async def send_loss(self, shard: Shard, tensor: np.ndarray, request_id: Optional[str] = None) -> Optional[np.array]:
     await self._ensure_connected()
+    cfg = active_config()
+    tensor_bytes = tensor.tobytes()
+    if cfg is not None:
+      tensor_bytes = apply_ber_to_bytes(tensor_bytes, cfg.upload_ber, cfg.seed)
+      await maybe_throttle(len(tensor_bytes), cfg.upload_gbps)
     request = node_service_pb2.TensorRequest(
       shard=node_service_pb2.Shard(
         model_id=shard.model_id,
@@ -164,15 +202,18 @@ class GRPCPeerHandle(PeerHandle):
         end_layer=shard.end_layer,
         n_layers=shard.n_layers,
       ),
-      tensor=node_service_pb2.Tensor(tensor_data=tensor.tobytes(), shape=tensor.shape, dtype=str(tensor.dtype)),
+      tensor=node_service_pb2.Tensor(tensor_data=tensor_bytes, shape=tensor.shape, dtype=str(tensor.dtype)),
       request_id=request_id,
     )
     response = await self.stub.SendLoss(request)
 
     if not response.tensor_data or not response.shape or not response.dtype:
       return None
-
-    return np.frombuffer(response.tensor_data, dtype=np.dtype(response.dtype)).reshape(response.shape)
+    resp_bytes = bytes(response.tensor_data)
+    if cfg is not None:
+      resp_bytes = apply_ber_to_bytes(resp_bytes, cfg.download_ber, cfg.seed)
+      await maybe_throttle(len(resp_bytes), cfg.download_gbps)
+    return np.frombuffer(resp_bytes, dtype=np.dtype(response.dtype)).reshape(response.shape)
 
   async def collect_topology(self, visited: set[str], max_depth: int) -> Topology:
     await self._ensure_connected()
@@ -193,7 +234,12 @@ class GRPCPeerHandle(PeerHandle):
     await self._ensure_connected()
     tensor = None
     if isinstance(result, np.ndarray):
-      tensor = node_service_pb2.Tensor(tensor_data=result.tobytes(), shape=result.shape, dtype=str(result.dtype))
+      cfg = active_config()
+      result_bytes = result.tobytes()
+      if cfg is not None:
+        result_bytes = apply_ber_to_bytes(result_bytes, cfg.upload_ber, cfg.seed)
+        await maybe_throttle(len(result_bytes), cfg.upload_gbps)
+      tensor = node_service_pb2.Tensor(tensor_data=result_bytes, shape=result.shape, dtype=str(result.dtype))
       result = []
     request = node_service_pb2.SendResultRequest(request_id=request_id, result=result, tensor=tensor, is_finished=is_finished)
     await self.stub.SendResult(request)

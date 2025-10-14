@@ -16,6 +16,11 @@ class SimulationConfig(BaseModel):
   ber: Optional[float] = None
   ber_scope: Optional[str] = None  # one of: forward_tensor, output_tensor, token_sampling
   weighting_alpha: Optional[float] = None
+  # Network simulation parameters (Gb/s and BER for upload/download)
+  upload_gbps: Optional[float] = None  # gigabits per second (Gb/s)
+  download_gbps: Optional[float] = None  # gigabits per second (Gb/s)
+  upload_ber: Optional[float] = None  # bit error rate applied to outgoing payload bytes
+  download_ber: Optional[float] = None  # bit error rate applied to incoming payload bytes
 
 
 def _read_profile_name_from_file() -> Optional[str]:

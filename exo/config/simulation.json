@@ -7,7 +7,11 @@
       "tops_scale": 0.5,
       "ber": 1e-6,
       "ber_scope": "output_tensor",
-      "weighting_alpha": 1.0
+      "weighting_alpha": 1.0,
+      "upload_gbps": 0.5,
+      "download_gbps": 0.5,
+      "upload_ber": 1e-8,
+      "download_ber": 1e-8
     },
     "a100_80g": {
       "enable": true,
@@ -16,7 +20,11 @@
       "tops_scale": 0.5,
       "ber": 1e-6,
       "ber_scope": "output_tensor",
-      "weighting_alpha": 1.0
+      "weighting_alpha": 1.0,
+      "upload_gbps": 0.5,
+      "download_gbps": 0.5,
+      "upload_ber": 1e-8,
+      "download_ber": 1e-8
     }
   },
   "default_profile": "a100_40g"

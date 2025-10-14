@@ -11,6 +11,7 @@ from exo import DEBUG
 from exo.inference.shard import Shard
 from exo.orchestration import Node
 import json
+from exo.simulation.network import active_config, maybe_throttle, apply_ber_to_bytes
 
 if platform.system().lower() == "darwin" and platform.machine().lower() == "arm64":
   import mlx.core as mx
@@ -68,10 +69,21 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
     )
     prompt = request.prompt
     request_id = request.request_id
+    # Network download throttle for prompt text; avoid BER to keep UTF-8 valid
+    cfg = active_config()
+    if cfg is not None and cfg.download_gbps is not None and cfg.download_gbps > 0:
+      try:
+        await maybe_throttle(len(prompt.encode('utf-8')), cfg.download_gbps)
+      except Exception:
+        pass
     inference_state = None if request.inference_state is None else self.deserialize_inference_state(request.inference_state)
     result = await self.node.process_prompt(shard, prompt, request_id, inference_state)
     if DEBUG >= 5: print(f"SendPrompt {shard=} {prompt=} {request_id=} result: {result}")
+    # Apply upload BER and throttle for outgoing bytes
     tensor_data = result.tobytes() if result is not None else None
+    if tensor_data is not None and cfg is not None:
+      tensor_data = apply_ber_to_bytes(tensor_data, cfg.upload_ber, getattr(cfg, 'seed', None))
+      await maybe_throttle(len(tensor_data), cfg.upload_gbps)
     return node_service_pb2.Tensor(tensor_data=tensor_data, shape=result.shape, dtype=str(result.dtype)) if result is not None else node_service_pb2.Tensor()
 
   async def SendTensor(self, request, context):
@@ -81,7 +93,13 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
       end_layer=request.shard.end_layer,
       n_layers=request.shard.n_layers,
     )
-    tensor = np.frombuffer(request.tensor.tensor_data, dtype=np.dtype(request.tensor.dtype)).reshape(request.tensor.shape)
+    # Apply download BER and throttle on incoming bytes
+    cfg = active_config()
+    req_bytes = bytes(request.tensor.tensor_data)
+    if cfg is not None:
+      req_bytes = apply_ber_to_bytes(req_bytes, cfg.download_ber, getattr(cfg, 'seed', None))
+      await maybe_throttle(len(req_bytes), cfg.download_gbps)
+    tensor = np.frombuffer(req_bytes, dtype=np.dtype(request.tensor.dtype)).reshape(request.tensor.shape)
     request_id = request.request_id
 
     inference_state = None if request.inference_state is None else self.deserialize_inference_state(request.inference_state)
@@ -89,6 +107,9 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
     result = await self.node.process_tensor(shard, tensor, request_id, inference_state)
     if DEBUG >= 5: print(f"SendTensor tensor {shard=} {tensor=} {request_id=} result: {result}")
     tensor_data = result.tobytes() if result is not None else None
+    if tensor_data is not None and cfg is not None:
+      tensor_data = apply_ber_to_bytes(tensor_data, cfg.upload_ber, getattr(cfg, 'seed', None))
+      await maybe_throttle(len(tensor_data), cfg.upload_gbps)
     return node_service_pb2.Tensor(tensor_data=tensor_data, shape=result.shape, dtype=str(result.dtype)) if result is not None else node_service_pb2.Tensor()
 
   async def SendExample(self, request, context):
@@ -98,15 +119,28 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
       end_layer=request.shard.end_layer,
       n_layers=request.shard.n_layers,
     )
-    example = np.frombuffer(request.example.tensor_data, dtype=np.dtype(request.example.dtype)).reshape(request.example.shape)
-    target = np.frombuffer(request.target.tensor_data, dtype=np.dtype(request.target.dtype)).reshape(request.target.shape)
-    length = np.frombuffer(request.length.tensor_data, dtype=np.dtype(request.length.dtype)).reshape(request.length.shape)
+    cfg = active_config()
+    # Incoming download side
+    ex_bytes = bytes(request.example.tensor_data)
+    tgt_bytes = bytes(request.target.tensor_data)
+    len_bytes = bytes(request.length.tensor_data)
+    if cfg is not None:
+      ex_bytes = apply_ber_to_bytes(ex_bytes, cfg.download_ber, getattr(cfg, 'seed', None))
+      tgt_bytes = apply_ber_to_bytes(tgt_bytes, cfg.download_ber, getattr(cfg, 'seed', None))
+      len_bytes = apply_ber_to_bytes(len_bytes, cfg.download_ber, getattr(cfg, 'seed', None))
+      await maybe_throttle(len(ex_bytes) + len(tgt_bytes) + len(len_bytes), cfg.download_gbps)
+    example = np.frombuffer(ex_bytes, dtype=np.dtype(request.example.dtype)).reshape(request.example.shape)
+    target = np.frombuffer(tgt_bytes, dtype=np.dtype(request.target.dtype)).reshape(request.target.shape)
+    length = np.frombuffer(len_bytes, dtype=np.dtype(request.length.dtype)).reshape(request.length.shape)
     train = request.train
     request_id = request.request_id
 
     if train and not shard.is_first_layer():
       loss, grad = await self.node.process_example(shard, example, target, length, train, request_id)
       tensor_data = grad.tobytes()
+      if cfg is not None:
+        tensor_data = apply_ber_to_bytes(tensor_data, cfg.upload_ber, getattr(cfg, 'seed', None))
+        await maybe_throttle(len(tensor_data), cfg.upload_gbps)
       grad_tensor = node_service_pb2.Tensor(tensor_data=tensor_data, shape=grad.shape, dtype=str(grad.dtype))
       return node_service_pb2.Loss(loss=loss, grads=grad_tensor)
     else:
@@ -142,7 +176,12 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
     if DEBUG >= 5: print(f"Received SendResult request: {request_id=} {result=} {is_finished=}")
     result = list(result)
     if len(img.tensor_data) > 0:
-      result = np.frombuffer(img.tensor_data, dtype=np.dtype(img.dtype)).reshape(img.shape)
+      cfg = active_config()
+      res_bytes = bytes(img.tensor_data)
+      if cfg is not None:
+        res_bytes = apply_ber_to_bytes(res_bytes, cfg.download_ber, getattr(cfg, 'seed', None))
+        await maybe_throttle(len(res_bytes), cfg.download_gbps)
+      result = np.frombuffer(res_bytes, dtype=np.dtype(img.dtype)).reshape(img.shape)
     self.node.on_token.trigger_all(request_id, result, is_finished)
     return node_service_pb2.Empty()
 
