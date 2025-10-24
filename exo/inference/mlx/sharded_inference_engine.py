@@ -13,6 +13,7 @@ import asyncio
 from collections import OrderedDict
 from mlx_lm.models.cache import make_prompt_cache
 from concurrent.futures import ThreadPoolExecutor
+from exo.simulation.throttle import throttle_sleep
 
 class MLXDynamicShardInferenceEngine(InferenceEngine):
   def __init__(self, shard_downloader: ShardDownloader):
@@ -99,6 +100,9 @@ class MLXDynamicShardInferenceEngine(InferenceEngine):
       self._mlx_thread,
       lambda: np.array(output_data, copy=False)
     )
+    # throttle proportionally to batch tokens processed in this step
+    tokens_count = int(input_data.shape[1]) if isinstance(input_data, np.ndarray) and input_data.ndim >= 2 else int(input_data.shape[0]) if isinstance(input_data, np.ndarray) else 1
+    await throttle_sleep(self.shard, tokens_count=max(1, tokens_count))
     return output_data, inference_state
 
   async def evaluate(self, request_id: str, shard: Shard, inputs, targets, lengths, loss: str = "length_masked_ce"):
