@@ -16,6 +16,7 @@ from .losses import length_masked_ce_loss
 from collections import OrderedDict
 import asyncio
 from typing import Optional
+from exo.simulation.throttle import throttle_sleep
 Tensor.no_grad = True 
 # default settings
 TEMPERATURE = int(os.getenv("TEMPERATURE", 0.85))
@@ -83,7 +84,10 @@ class TinygradDynamicShardInferenceEngine(InferenceEngine):
     def sample_wrapper():
       logits = x[:, -1, :]
       return sample_logits(Tensor(logits).flatten(), temp, 0, 0.8, top_p, 0.0).realize().numpy().astype(int)
-    return await asyncio.get_running_loop().run_in_executor(self.executor, sample_wrapper)
+    out = await asyncio.get_running_loop().run_in_executor(self.executor, sample_wrapper)
+    # throttle based on one token produced
+    await throttle_sleep(self.shard, tokens_count=1)
+    return out
 
   async def encode(self, shard: Shard, prompt: str) -> np.ndarray:
     await self.ensure_shard(shard)
@@ -115,6 +119,9 @@ class TinygradDynamicShardInferenceEngine(InferenceEngine):
       self.states[request_id].start += x.shape[1]
       return out.numpy()
     output_data = await asyncio.get_running_loop().run_in_executor(self.executor, wrap_infer)
+    # throttle proportionally to batch tokens processed in this step
+    tokens_count = int(input_data.shape[1]) if input_data.ndim >= 2 else int(input_data.shape[0])
+    await throttle_sleep(self.shard, tokens_count=max(1, tokens_count))
     return output_data, inference_state
 
   async def evaluate(self, request_id: str, shard: Shard, inputs, targets, lengths, loss=length_masked_ce_loss):
