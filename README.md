@@ -88,7 +88,7 @@ The current recommended way to install exo is from source.
 
 
 ```sh
-git clone https://github.com/exo-explore/exo.git
+git clone https://github.com/Blue16-WangFudi/exo-simulation.git
 cd exo
 pip install -e .
 # alternatively, with venv
@@ -98,7 +98,7 @@ source install.sh
 ### Linux (conda, one-command)
 
 ```sh
-git clone https://github.com/exo-explore/exo.git
+git clone https://github.com/Blue16-WangFudi/exo-simulation.git
 cd exo
 bash scripts/install_linux_conda.sh
 conda activate exo-gpu
