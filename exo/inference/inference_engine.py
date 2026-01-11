@@ -67,8 +67,10 @@ def get_inference_engine(inference_engine_name: str, shard_downloader: ShardDown
     return MLXDynamicShardInferenceEngine(shard_downloader)
   elif inference_engine_name == "tinygrad":
     from exo.inference.tinygrad.inference import TinygradDynamicShardInferenceEngine
+    from exo.inference.tinygrad.tinygrad_cuda_patch import patch_tinygrad_cuda_includes
     import tinygrad.helpers
     tinygrad.helpers.DEBUG.value = int(os.getenv("TINYGRAD_DEBUG", default="0"))
+    patch_tinygrad_cuda_includes()
 
     return TinygradDynamicShardInferenceEngine(shard_downloader)
   elif inference_engine_name == "dummy":

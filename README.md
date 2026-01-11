@@ -74,6 +74,7 @@ The current recommended way to install exo is from source.
   - NVIDIA driver - verify with `nvidia-smi`
   - CUDA toolkit - install from [NVIDIA CUDA guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#cuda-cross-platform-installation), verify with `nvcc --version`
   - cuDNN library - download from [NVIDIA cuDNN page](https://developer.nvidia.com/cudnn-downloads), verify installation by following [these steps](https://docs.nvidia.com/deeplearning/cudnn/latest/installation/linux.html#verifying-the-install-on-linux:~:text=at%20a%20time.-,Verifying%20the%20Install%20on%20Linux,Test%20passed!,-Upgrading%20From%20Older)
+  - If you prefer not to install system CUDA/cuDNN, the conda script below installs CUDA + cuDNN inside the environment.
 
 ### Hardware Requirements
 
@@ -94,10 +95,28 @@ pip install -e .
 source install.sh
 ```
 
+### Linux (conda, one-command)
+
+```sh
+git clone https://github.com/exo-explore/exo.git
+cd exo
+bash scripts/install_linux_conda.sh
+conda activate exo-gpu
+exo
+```
+
+You can pass a custom environment name:
+
+```sh
+bash scripts/install_linux_conda.sh my-exo
+conda activate my-exo
+```
+
 
 ### Troubleshooting
 
 - If running on Mac, MLX has an [install guide](https://ml-explore.github.io/mlx/build/html/install.html) with troubleshooting steps.
+- If you see `NVRTC_ERROR_COMPILATION` complaining about `cuda_fp16.h`, make sure you start exo from the activated conda environment created by `scripts/install_linux_conda.sh`.
 
 ### Performance
 
