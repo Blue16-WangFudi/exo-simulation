@@ -117,6 +117,11 @@ conda activate .conda/my-exo
 
 - If running on Mac, MLX has an [install guide](https://ml-explore.github.io/mlx/build/html/install.html) with troubleshooting steps.
 - If you see `NVRTC_ERROR_COMPILATION` complaining about `cuda_fp16.h`, make sure you start exo from the activated conda environment created by `scripts/install_linux_conda.sh`.
+- If your network environment is restricted, set the Hugging Face mirror endpoint before running exo:
+  - `export HF_ENDPOINT=https://hf-mirror.com`
+- Model cache location:
+  - root user: `/root/.cache/exo/downloads`
+  - non-root user: `~/.cache/exo/downloads`
 
 ### Performance
 
