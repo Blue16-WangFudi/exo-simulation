@@ -99,9 +99,9 @@ source install.sh
 
 ```sh
 git clone https://github.com/Blue16-WangFudi/exo-simulation.git
-cd exo
+cd exo-simulation
 bash scripts/install_linux_conda.sh
-conda activate exo-gpu
+conda activate .conda/exo-gpu
 exo
 ```
 
@@ -109,7 +109,7 @@ You can pass a custom environment name:
 
 ```sh
 bash scripts/install_linux_conda.sh my-exo
-conda activate my-exo
+conda activate .conda/my-exo
 ```
 
 
