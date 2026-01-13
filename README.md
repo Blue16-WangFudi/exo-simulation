@@ -123,6 +123,36 @@ conda activate .conda/my-exo
   - root user: `/root/.cache/exo/downloads`
   - non-root user: `~/.cache/exo/downloads`
 
+### Docker Compose (GPU, shared conda env, local model cache)
+
+This repo includes a `docker-compose.yml` that reuses the local conda env and stores models inside the repo under `./.cache/exo`.
+
+```sh
+export EXO_UID=$(id -u)
+export EXO_GID=$(id -g)
+docker compose up -d --force-recreate
+```
+
+- WebUI:
+  - `http://127.0.0.1:52415` (node1)
+  - `http://127.0.0.1:52416` (node2)
+- Hugging Face mirror is set in the container:
+  - `HF_ENDPOINT=https://hf-mirror.com`
+- Model cache on host:
+  - `./.cache/exo/downloads`
+
+If you hit permission errors when downloading models locally, fix ownership:
+
+```sh
+sudo chown -R $(id -u):$(id -g) .cache
+```
+
+To download a specific model into the repo cache:
+
+```sh
+scripts/download_model.sh llama-3.2-1b
+```
+
 ### Performance
 
 - There are a number of things users have empirically found to improve performance on Apple Silicon Macs:

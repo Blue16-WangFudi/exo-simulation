@@ -1,0 +1,78 @@
+services:
+  exo-node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: exo-simulation:cuda
+    container_name: exo-node1
+    networks:
+      - exo-net
+    working_dir: /home/blue16/dev_workspace/exo-simulation
+    volumes:
+      - .:/home/blue16/dev_workspace/exo-simulation
+      - ./.cache/exo:/root/.cache/exo
+    environment:
+      - EXO_HOME=/root/.cache/exo
+      - EXO_UID=${EXO_UID:-1000}
+      - EXO_GID=${EXO_GID:-1000}
+      - HF_ENDPOINT=https://hf-mirror.com
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=0
+      - CUDA=1
+      - PATH=/home/blue16/dev_workspace/exo-simulation/.conda/exo-gpu/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - LD_LIBRARY_PATH=/home/blue16/dev_workspace/exo-simulation/.conda/exo-gpu/lib:/usr/local/cuda/lib64:/usr/local/cuda/compat:${LD_LIBRARY_PATH}
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    gpus: all
+    ports:
+      - "52415:52415"
+    command: >
+      bash -lc "/home/blue16/dev_workspace/exo-simulation/scripts/start_exo.sh 50051 52415"
+
+  exo-node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: exo-simulation:cuda
+    container_name: exo-node2
+    networks:
+      - exo-net
+    working_dir: /home/blue16/dev_workspace/exo-simulation
+    volumes:
+      - .:/home/blue16/dev_workspace/exo-simulation
+      - ./.cache/exo:/root/.cache/exo
+    environment:
+      - EXO_HOME=/root/.cache/exo
+      - EXO_UID=${EXO_UID:-1000}
+      - EXO_GID=${EXO_GID:-1000}
+      - HF_ENDPOINT=https://hf-mirror.com
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=0
+      - CUDA=1
+      - PATH=/home/blue16/dev_workspace/exo-simulation/.conda/exo-gpu/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - LD_LIBRARY_PATH=/home/blue16/dev_workspace/exo-simulation/.conda/exo-gpu/lib:/usr/local/cuda/lib64:/usr/local/cuda/compat:${LD_LIBRARY_PATH}
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    gpus: all
+    ports:
+      - "52416:52416"
+    command: >
+      bash -lc "/home/blue16/dev_workspace/exo-simulation/scripts/start_exo.sh 50052 52416"
+
+networks:
+  exo-net:
+    driver: bridge
